@@ -1,0 +1,170 @@
+---
+title: "HW03"
+author: "Ulrich Bergmann"
+date: "10/11/2020"
+output: html_document
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE, 
+  message = FALSE
+  )
+```
+
+```{r}
+# load packages
+library("webuse")       # top import data from stata's website
+library("dplyr")        # for nice data manipulations
+library("ggplot2")      # For plotting
+library("ggthemes")     # Fancy WSJ theme for plot
+library("lfe")          # FE & clustered regressions
+library("Hmisc")        # make correlation matrix w/ p-values
+library("corrplot")     # visualize correlation matrix
+library("texreg")       # nice regression tables
+library("pander")       # nice tables
+library("broom")        # clean up for FE tables 
+
+# install missing packages w/ `install.packages("name1", "name2", ...)
+```
+
+
+## Load Data
+
+```{r}
+df = webuse("nlswork")
+```
+
+## Summary Statistics
+
+```{r}
+# Summarize the dataset
+summary(df) %>%
+  pander()
+```
+
+```{r}
+# tabulate college and union status
+df %>% 
+  group_by(collgrad) %>%
+  summarise(in_union             = mean(union, na.rm = TRUE),
+            union_status_missing = mean(is.na(union))) %>%
+  pander()
+```
+
+```{r}
+# generate a variable for log hours worked
+df = mutate(df, log_hours = log(hours))
+```
+
+```{r}
+# plot log hours against year separately for union and non-union
+df %>% 
+  filter(is.na(union) == FALSE) %>%
+  mutate(union = recode_factor(union, `1` = "union member", `0` = "not member")) %>%
+  ggplot(aes(x = year, y = log_hours)) + 
+    geom_point(aes(colour = union), alpha = 0.1) +
+    geom_smooth(aes(colour = union)) +
+    facet_wrap(~ union) + 
+    ggtitle("Log Hours Worked") +
+    guides(color = "none") +
+    scale_colour_wsj("colors6", "") + 
+    theme_wsj()
+```
+
+## Regression: Effect of Union Status on Hours Worked
+
+```{r}
+# Regress hours worked against union status
+lm(hours ~ union, data = df) %>%
+  summary() %>%
+  pander()
+```
+
+**What is the identification assumption for the coefficient on union to be causal?**
+
+Answer: 
+
+- It assumes that hours worked do not influence union entry. 
+- However, it is likely that
+    1. low hours worked motivate workers to enter a union
+    2. hours worked in earlier years are correlated with hours worked later
+- both jointly make the assumption highly dubious here
+- More formally it assumes that E(hours_0|union==1) = E(hours_0|union==0), where hours_0 is the amount of hours worked without union membership (measured value for non members and counterfactual for union members)
+
+```{r}
+# Regress hours worked against union status with individual (idcode) and year fixed effects
+felm(hours ~ union | idcode + year, data = df) %>%
+  tidy() %>%
+  pander()
+```
+
+**What is the identification assumption for the coefficient on union to be causal?**
+
+Answer:
+
+1. We identify the causal effect of union membership only through those individuals for which the variable varies over time, which is rougly 20\% of the subjects without missing union observations. 
+2. We assume that the year and individual fixed effects capture the selection bias well and that there are no omitted variable biases present.
+
+```{r}
+# Now cluster standard errors.
+model1 = felm(hours ~ union | idcode + year | 0 | union, data = df)
+
+model1 %>%
+  tidy() %>%
+  pander()
+```
+
+**What level should you cluster at and why?**
+
+We should cluster at the treatment level, i.e. union membership.
+
+**What do you notice about the coefficients?**
+
+Only the errors change, not the coefficient estimates.
+
+
+**What are "good controls" in the dataset in terms of being exogenous to union status?**
+
+Answer: To be honest, I don't think any variable here is trully independent with respect to union status but let's check
+
+```{r}
+my_corr = rcorr(as.matrix(df))
+
+corrplot(my_corr$r, 
+         type      = "upper", 
+         order     = "alphabet",
+         p.mat     = my_corr$P, 
+         tl.col    = "black", 
+         tl.srt    = 45, 
+         sig.level = 0.01, 
+         insig     = "pch",
+         pch.cex   = 1)
+```
+
+Empirically, weeks unemployed in the previous year, year and industry code seem to be uncorrelated with union status.
+
+```{r, results = 'asis'}
+# add them to the regression, interacted with year
+model2 = felm(hours ~ union + factor(ind_code):factor(year) | idcode + year + ind_code + wks_ue  | 0 | union, data = df)
+
+knitreg(list(model1, model2),
+        omit.coef = "factor",
+        custom.model.names = c("Basic Model", "Enhanced Model"))
+
+```
+
+**How do these change your estimates**
+
+Not by much, however it reduces noise by quite a lot, which is nice. On the other hand the adjusted R2 value indicates it to be the worse model.
+
+## Short Essay: Correlation/Causation
+
+**Find a news article mistaking correlation for causation. Link to the article and write a short paragraph explaining the mistake.**
+
+The [news article](https://www.wellandgood.com/intermittent-fasting-breakfast) discusses a [research article](https://www.onlinejacc.org/content/73/16/2025) which features an association study which correlates skipping breakfast with cardiovascular and all-cause mortality.
+
+The news article interprets the relationship as causal while the research article presents it as associative / correlational. While the research article controls for many relevant variables which might be correlated with mortality and a life style of not eating breakfast, it is neither a RCT nor does it include important variables such as an indicator of changing working shifts or working at night which might be positively correlated with morbidity and negatively with the propensity to eat breakfast and could therefore increase or drive the observed (and barely significant) effect.
+
