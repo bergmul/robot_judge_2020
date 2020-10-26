@@ -78,10 +78,13 @@ df %>%
 
 ```{r}
 # Regress hours worked against union status
-lm(hours ~ union, data = df) %>%
+# use log hours
+lm(log_hours ~ union, data = df) %>%
   summary() %>%
   pander()
 ```
+
+We see there is a positive relationship of union membership on hours worked
 
 **What is the identification assumption for the coefficient on union to be causal?**
 
@@ -93,6 +96,10 @@ Answer:
     2. hours worked in earlier years are correlated with hours worked later
 - both jointly make the assumption highly dubious here
 - More formally it assumes that E(hours_0|union==1) = E(hours_0|union==0), where hours_0 is the amount of hours worked without union membership (measured value for non members and counterfactual for union members)
+
+TA Session Answer:
+- no ommited variables which are correlated with both X and Y
+- no reverse causality
 
 ```{r}
 # Regress hours worked against union status with individual (idcode) and year fixed effects
@@ -108,6 +115,9 @@ Answer:
 1. We identify the causal effect of union membership only through those individuals for which the variable varies over time, which is rougly 20\% of the subjects without missing union observations. 
 2. We assume that the year and individual fixed effects capture the selection bias well and that there are no omitted variable biases present.
 
+TA Session Answer:
+Differently from before, here we control for factors that are fixed either over time within the same individual (e.g. year of birth) or across individuals within the same year (e.g. the presence of a crisis). Therefore, we only have to assume that there are no variables, varying both over time and across individuals, that are correlated with both hours worked and union status.
+
 ```{r}
 # Now cluster standard errors.
 model1 = felm(hours ~ union | idcode + year | 0 | union, data = df)
@@ -121,14 +131,23 @@ model1 %>%
 
 We should cluster at the treatment level, i.e. union membership.
 
+TA Session Answer:
+Standard errors are clustered at the individual level because this is the level at which the “treatment” is assigned. The coefficient does not change, but the
+standard errors do.
+
 **What do you notice about the coefficients?**
 
 Only the errors change, not the coefficient estimates.
 
-
 **What are "good controls" in the dataset in terms of being exogenous to union status?**
 
 Answer: To be honest, I don't think any variable here is trully independent with respect to union status but let's check
+
+TA Session Answer:
+
+All demographic variables (age, race, place of living, etc.) can be considered as good controls as the decision about joining a union cannot affect these
+variables. The estimate doesn't change by much and, most importantly, the sign is consistent across all specifications hinting towards a positive effect of
+union status on hours worked.
 
 ```{r}
 my_corr = rcorr(as.matrix(df))
